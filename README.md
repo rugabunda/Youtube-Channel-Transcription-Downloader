@@ -1,5 +1,4 @@
-***
-```
+
 # YouTube Channel Transcript Downloader (v1.1.0)
 
 A robust, safety-first Python script that downloads transcripts (subtitles/captions) for all videos in one or more YouTube channels, or individual videos. 
