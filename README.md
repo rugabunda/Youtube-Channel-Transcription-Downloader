@@ -1,152 +1,138 @@
+You are absolutely right, I apologize for that oversight! The `-LANG` option and language support are core features of the script and should definitely be highlighted in the README.
+
+Here is the corrected `README.md` with the language features properly restored and emphasized:
+
+```markdown
+# YouTube Channel Transcript Downloader (v1.1.0)
+
+A robust, safety-first Python script that downloads transcripts (subtitles/captions) for all videos in one or more YouTube channels, or individual videos. 
+
+Designed with strict anti-ban mechanisms, it protects your IP from YouTube's aggressive scraping defenses while organizing your data into clean, language-specific folders. Existing files are automatically skipped, allowing you to safely resume or update large channels over time.
+
+## ✨ Key Features
+
+- **Safe-by-Default Rate Limiting:** Defaults to a 7-second delay and 1 concurrent worker to prevent IP bans.
+- **Multi-Language Support:** Download specific languages (e.g., `-en -es -fr`) or grab ALL available languages (`-all`).
+- **Top-Level Configuration:** Easily adjust global safety thresholds at the top of the script.
+- **Comprehensive Downloads:** Target single videos, playlists, or entire channels.
+- **Dual Formats:** Export to human-readable `.txt` and structured `.json` formats.
+- **Resumable:** Automatically skips videos that have already been downloaded.
+- **Smart Organization:** Creates dedicated folders for channels and automatically sorts transcripts by language.
+- **Reliable Extraction:** Automatically normalizes channel URLs (appending `/videos`) for bulletproof `yt-dlp` compatibility.
+- **Intelligent Error Handling:** Skips age-restricted, unplayable, or disabled-subtitle videos without wasting retries.
+- **Automated Recovery:** Implements exponential backoff and automatic pausing if a rate limit (429) is detected.
 
 ---
 
-# YouTube Channel Transcript Downloader
+## 📦 Requirements & Installation
 
-This script downloads transcripts for all videos in one or more YouTube channels, or individual videos, in all available languages. It creates organized folders for each channel and manages files into subdirectories. Downloads are processed with rate-limiting to avoid YouTube IP bans, and existing files are skipped, allowing you to resume or update channels efficiently. Key features include:
+This script requires **Python 3.7+** and relies on the modern (v1.0.0+) `youtube-transcript-api`.
 
-- Download transcripts for single or multiple videos and channels.
-- Support for downloading transcripts in multiple languages, including all available languages.
-- Options to download only TXT or JSON files.
-- Configurable request delays and concurrency to manage download speed and avoid IP bans.
-- Smart error handling with retries, exponential backoff, and error skipping for non-retryable issues.
-- Organized file structure based on language and channel.
-- Command-line options for flexible usage, including reading URLs from a file.
+Install the required dependencies via pip:
+
+```bash
+pip install youtube-transcript-api yt-dlp colorama tqdm
+```
+
+*Note: Ensure your `yt-dlp` is up to date (`pip install --upgrade yt-dlp`) as YouTube frequently changes its frontend, which can break older versions of `yt-dlp`.*
 
 ---
 
-You can now replace the existing summary in your README.md file with this improved version.
+## ⚙️ Configuration (Safety First!)
 
-## Usage
+To protect your IP, open `Youtube.Transcribe.py` and locate the **Safety & Rate Limiting Configuration** block at the very top of the file. Adjust these values based on your risk tolerance:
+
+```python
+# DEFAULT_DELAY: Time in seconds to wait between EACH download attempt.
+DEFAULT_DELAY = 7.0
+
+# DEFAULT_WORKERS: Number of concurrent download threads. 
+# Keep at 1 to avoid triggering YouTube's anti-bot defenses.
+DEFAULT_WORKERS = 1
+
+# MIN_DELAY: The absolute minimum delay allowed via command-line arguments.
+MIN_DELAY = 3.0
+
+# MAX_WORKERS: The absolute maximum number of workers allowed via command-line.
+MAX_WORKERS = 2
+```
+
+> **⚠️ Warning:** If you have previously been IP-banned by YouTube, it is highly recommended to leave these at their safe defaults. Running with high concurrency (`-workers > 1`) or low delays (`-delay < 5`) will flash a red warning in the console and significantly increase your risk of a multi-month ban.
+
+---
+
+## 🚀 Usage
 
 ```bash
 python Youtube.Transcribe.py [options] <channel_or_video_url(s)>
 ```
 
-## Examples
+### Examples
 
-- **Download transcript for a single YouTube video**
-  ```bash
-  python Youtube.Transcribe.py https://www.youtube.com/watch?v=dQw4w9WgXcQ -en
-  ```
-- **Short URL also works**
-  ```bash
-  python Youtube.Transcribe.py https://youtu.be/dQw4w9WgXcQ -en
-  ```
-- **Multiple URLs**
-  ```bash
-  python Youtube.Transcribe.py https://youtu.be/aDkzgTWhVY4 https://youtu.be/3ZC1iqYfFGU -en
-  ```
-- **Download English transcripts from a channel**
-  ```bash
-  python Youtube.Transcribe.py https://www.youtube.com/channel/UC-lHJZR3Gqxm24_Vd_AJ5Yw -en
-  ```
-- **Download multiple languages**
-  ```bash
-  python Youtube.Transcribe.py https://youtube.com/c/channel1 -en -es -fr
-  ```
-- **Download all available languages**
-  ```bash
-  python Youtube.Transcribe.py https://youtube.com/c/channel1 -all
-  ```
-- **Download only TXT files (no JSON)**
-  ```bash
-  python Youtube.Transcribe.py https://youtube.com/c/channel1 -en -txt
-  ```
-- **Download only JSON files (no TXT)**
-  ```bash
-  python Youtube.Transcribe.py https://youtube.com/c/channel1 -en -json
-  ```
-- **Faster downloads (may increase risk of IP ban)**
-  ```bash
-  python Youtube.Transcribe.py https://youtube.com/c/channel1 -en -delay 1 -workers 5
-  ```
-- **Slower, safer downloads (to prevent IP bans)**
-  ```bash
-  python Youtube.Transcribe.py https://youtube.com/c/channel1 -en -delay 3 -workers 2
-  ```
-- **Download from multiple channels**
-  ```bash
-  python Youtube.Transcribe.py https://youtube.com/c/channel1 https://youtube.com/c/channel2 -en
-  ```
-- **Download from channels listed in a file (one URL per line or comma-separated)**
-  ```bash
-  python Youtube.Transcribe.py -f channels.txt -en
-  ```
-
-## Options
-
-- `-f, --file FILE`    Read channel URLs from a text file (one per line or comma-separated)
-- `-LANG`              Language code for transcripts (e.g., `-en` for English). Multiple language codes can be specified (e.g., `-en -es -fr`)
-- `-all`               Download all available languages for each video
-- `-txt`               Download only TXT files (no JSON)
-- `-json`              Download only JSON files (no TXT)
-- `-delay N`           Delay between API requests in seconds (default: 1.5). Higher values reduce risk of IP bans but slow downloads
-- `-workers N`         Number of concurrent downloads (default: 3, range: 1-10). Lower values reduce risk of IP bans but slow downloads
-- `-h, --help`         Show this help message
-
-## Rate Limiting
-
-To avoid YouTube IP bans, this script implements several protection measures:
-
-1. Request delays: Controlled delay between API calls (adjust with `-delay`)
-2. Random jitter: ±20% randomness added to each delay to avoid pattern detection
-3. Limited concurrency: Restricted parallel downloads (adjust with `-workers`)
-4. Smart retries: Automatic detection of non-retryable errors (age-restricted videos, etc.)
-5. Exponential backoff: Increasingly longer delays after rate limit errors
-6. Error skipping: No retry for videos that cannot have transcripts (subtitles disabled, etc.)
-
-### Recommended Settings
-
-- **Normal usage**: Default values (`-delay 1.5 -workers 3`)
-- **If IP banned**:
-  1. Switch to very slow settings (`-delay 5 -workers 1`) until ban is lifted
-  2. After ban is lifted, continue with these slow settings for 5-7 minutes
-  3. Then reduce to half your original speed (double delay, halve workers)
-  4. If banned again, repeat the halving process until bans stop permanently
-
-  Example: If original settings were `-delay 1 -workers 6`, after recovery use `-delay 2 -workers 3`, then `-delay 4 -workers 2` if banned again.
-
-## File Organization
-
-Files are organized based on languages detected and requested:
-
-- **Single language mode** (when only one language exists or is requested):
-  ```
-  ./transcripts/[Channel Name]/json/[Video Title]_[VideoID]_[lang].json
-  ./transcripts/[Channel Name]/[Video Title]_[VideoID]_[lang].txt
-  ```
-- **Multiple language mode** (triggered when):
-  - Multiple languages are requested in the command
-  - Multiple languages already exist in the folder
-  - A new language is requested that doesn't match existing files
-
-  In this mode, files are organized as:
-  ```
-  ./transcripts/[Channel Name]/[lang]/json/[Video Title]_[VideoID]_[lang].json
-  ./transcripts/[Channel Name]/[lang]/[Video Title]_[VideoID]_[lang].txt
-  ```
-
-## Notes
-
-- If no language is specified, your system language will be used
-- If system language cannot be determined, English will be used
-- Use Ctrl+C to properly terminate the script
-- The script will automatically reorganize files when switching to multiple language mode
-
-## File Format
-
-The channel URL file can contain URLs in any of these formats:
-
-- One URL per line
-- Comma-separated URLs
-- Comma with spaces between URLs
-
-Example file content:
+**Download English transcript for a single YouTube video**
+```bash
+python Youtube.Transcribe.py https://www.youtube.com/watch?v=dQw4w9WgXcQ -en
 ```
-https://youtube.com/channel/UC123, https://youtube.com/c/channel2
-https://youtube.com/user/someuser
+
+**Short URL also works**
+```bash
+python Youtube.Transcribe.py https://youtu.be/dQw4w9WgXcQ -en
 ```
+
+**Multiple URLs**
+```bash
+python Youtube.Transcribe.py https://youtu.be/aDkzgTWhVY4 https://youtu.be/3ZC1iqYfFGU -en
+```
+
+**Download English transcripts from an entire channel**
+```bash
+python Youtube.Transcribe.py https://www.youtube.com/@ChannelName -en
+```
+
+**Download multiple languages simultaneously**
+```bash
+python Youtube.Transcribe.py https://youtube.com/c/channel1 -en -es -fr
+```
+
+**Download ALL available languages for a channel**
+```bash
+python Youtube.Transcribe.py https://youtube.com/c/channel1 -all
+```
+
+**Download only TXT files (no JSON)**
+```bash
+python Youtube.Transcribe.py https://youtube.com/c/channel1 -en -txt
+```
+
+**Download only JSON files (no TXT)**
+```bash
+python Youtube.Transcribe.py https://youtube.com/c/channel1 -en -json
+```
+
+**Aggressive downloads (⚠️ High risk of IP ban)**
+```bash
+python Youtube.Transcribe.py https://youtube.com/c/channel1 -en -delay 3 -workers 2
+```
+
+**Download from channels listed in a text file**
+```bash
+python Youtube.Transcribe.py -f channels.txt -en
+```
+
+---
+
+## 🛠️ Command-Line Options
+
+| Option | Description |
+| :--- | :--- |
+| `-f, --file FILE` | Read channel URLs from a text file (one per line or comma-separated). |
+| `-LANG` | Language code for transcripts (e.g., `-en` for English). Multiple codes can be specified (`-en -es -fr`). |
+| `-all` | Download **all** available languages for each video. |
+| `-txt` | Download **only** TXT files (skips JSON). |
+| `-json` | Download **only** JSON files (skips TXT). |
+| `-delay N` | Delay between API requests in seconds (Default: `7.0`). |
+| `-workers N` | Number of concurrent downloads (Default: `1`, Max: `2`). |
+| `-h, --help` | Show the help message and exit. |
 
 ## Available Language Codes
 
@@ -164,10 +150,37 @@ https://youtube.com/user/someuser
 - `-sk`      - Slovak                     - `-lt`      - Lithuanian                 - `-sl`      - Slovenian
 - `-et`      - Estonian                   - `-lv`      - Latvian
 
-## Requirements
+---
 
-- Python 3.6+
-- youtube_transcript_api (`pip install youtube-transcript-api`)
-- yt-dlp (`pip install yt-dlp`)
+## 🛡️ Rate Limiting & Anti-Ban Features
+
+YouTube aggressively bans IPs that scrape transcripts too quickly. This script implements several layers of protection:
+
+1. **Human-like Jitter:** Adds ±20% random variance to your delay (e.g., a 7s delay becomes 5.6s to 8.4s) to avoid robotic timing patterns.
+2. **Hard Limits:** Prevents you from accidentally running dangerous CLI arguments by enforcing `MIN_DELAY` and `MAX_WORKERS`.
+3. **Exponential Backoff:** If a request fails, the wait time doubles before the next retry.
+4. **Automated Recovery Pause:** If the script detects a `429 Too Many Requests` or `IpBlocked` error, it immediately drops to 1 worker, increases the delay to 10 seconds, and pauses execution for 5–7 minutes to let the IP cooldown before resuming.
+5. **Smart Skipping:** Instantly skips videos with disabled subtitles, age-restrictions, or unavailable transcripts without triggering retry penalties.
 
 ---
+
+## 🔧 Troubleshooting
+
+**"No video data returned" or `yt-dlp` errors:**
+YouTube frequently updates its frontend. If `yt-dlp` fails to fetch the channel list, update it:
+```bash
+pip install --upgrade yt-dlp
+```
+
+**"type object 'YouTubeTranscriptApi' has no attribute 'get_transcript'":**
+You are using an outdated version of the transcript API. Update it to v1.0.0+:
+```bash
+pip install --upgrade youtube-transcript-api
+```
+
+**"IpBlocked" or "RequestBlocked" errors:**
+Your IP has been temporarily flagged by YouTube. 
+1. Stop the script immediately.
+2. Wait 24-48 hours (or switch to a different network/VPN).
+3. Ensure your `DEFAULT_DELAY` is set to `7.0` or higher and `DEFAULT_WORKERS` is `1` before trying again.
+```
