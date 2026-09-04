@@ -15,12 +15,53 @@ import random
 import logging
 
 # Third-party imports
-from youtube_transcript_api import YouTubeTranscriptApi, _errors
+from youtube_transcript_api import (
+    YouTubeTranscriptApi,
+    YouTubeTranscriptApiException,
+    NoTranscriptFound,
+    TranscriptsDisabled,
+    IpBlocked,
+    RequestBlocked,
+    VideoUnavailable,
+    VideoUnplayable,
+    CouldNotRetrieveTranscript,
+    AgeRestricted,
+    YouTubeRequestFailed,
+    InvalidVideoId
+)
 from tqdm import tqdm
 from colorama import Fore, Back, Style, init as colorama_init
 
 # Initialize colorama for cross-platform colored terminal text
 colorama_init(autoreset=True)
+
+# ==============================================================================
+# SAFETY & RATE LIMITING CONFIGURATION
+# ==============================================================================
+# Adjust these values at the top of the script to prevent IP bans.
+# If you have been banned before, it is highly recommended to keep these 
+# values high (conservative) to avoid triggering YouTube's anti-scraping 
+# defenses.
+# ==============================================================================
+
+# DEFAULT_DELAY: Time in seconds to wait between EACH download attempt.
+# Default is 7.0 seconds. This adds a safe buffer between requests.
+DEFAULT_DELAY = 7.0
+
+# DEFAULT_WORKERS: Number of concurrent download threads.
+# Default is 1. Using more than 1 worker drastically increases the risk of a ban.
+DEFAULT_WORKERS = 1
+
+# MIN_DELAY: The absolute minimum delay allowed via command-line arguments.
+# This acts as a safeguard against accidental command-line typos.
+MIN_DELAY = 3.0
+
+# MAX_WORKERS: The absolute maximum number of workers allowed via command-line.
+MAX_WORKERS = 2
+# ==============================================================================
+
+# Initialize the YouTube Transcript API instance globally
+ytt_api = YouTubeTranscriptApi()
 
 # Set up logging configuration with color support
 class ColoredFormatter(logging.Formatter):
@@ -96,7 +137,7 @@ def display_logo():
 {Fore.CYAN}┃ {Fore.YELLOW}  | | (_) | |_| | | || |_| | |_) |  __/   | || | | (_| | | | \__ \ (__  {Fore.CYAN}┃
 {Fore.CYAN}┃ {Fore.YELLOW}  |_|\___/ \__,_| |_| \__,_|_.__/ \___|   |_||_|  \__,_|_| |_|___/\___| {Fore.CYAN}┃
 {Fore.CYAN}┃                                                                         {Fore.CYAN}┃
-{Fore.CYAN}┃ {Fore.GREEN}Channel Transcript Downloader                                    v1.0.0 {Fore.CYAN}┃
+{Fore.CYAN}┃ {Fore.GREEN}Channel Transcript Downloader                                    v1.1.0 {Fore.CYAN}┃
 {Fore.CYAN}╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
 {Style.RESET_ALL}"""
     print(logo)
@@ -140,10 +181,10 @@ def display_help(show_logo=True):
     print("  python Youtube.Transcribe.py https://youtube.com/c/channel1 -en -json")
     
     print(f"{Fore.CYAN}  # Faster downloads (may increase risk of IP ban)")
-    print("  python Youtube.Transcribe.py https://youtube.com/c/channel1 -en -delay 1 -workers 5")
+    print("  python Youtube.Transcribe.py https://youtube.com/c/channel1 -en -delay 3 -workers 2")
     
     print(f"{Fore.CYAN}  # Slower, safer downloads (to prevent IP bans)")
-    print("  python Youtube.Transcribe.py https://youtube.com/c/channel1 -en -delay 3 -workers 2")
+    print(f"  python Youtube.Transcribe.py https://youtube.com/c/channel1 -en -delay {DEFAULT_DELAY} -workers {DEFAULT_WORKERS}")
     
     print(f"{Fore.CYAN}  # Download from multiple channels")
     print("  python Youtube.Transcribe.py https://youtube.com/c/channel1 https://youtube.com/c/channel2 -en")
@@ -158,9 +199,9 @@ def display_help(show_logo=True):
     print(f"{Fore.YELLOW}  -all{Style.RESET_ALL}               Download all available languages for each video")
     print(f"{Fore.YELLOW}  -txt{Style.RESET_ALL}               Download only TXT files (no JSON)")
     print(f"{Fore.YELLOW}  -json{Style.RESET_ALL}              Download only JSON files (no TXT)")
-    print(f"{Fore.YELLOW}  -delay N{Style.RESET_ALL}           Delay between API requests in seconds (default: 1.5)")
+    print(f"{Fore.YELLOW}  -delay N{Style.RESET_ALL}           Delay between API requests in seconds (default: {DEFAULT_DELAY})")
     print("                     Higher values reduce risk of IP bans but slow downloads")
-    print(f"{Fore.YELLOW}  -workers N{Style.RESET_ALL}         Number of concurrent downloads (default: 3, range: 1-10)")
+    print(f"{Fore.YELLOW}  -workers N{Style.RESET_ALL}         Number of concurrent downloads (default: {DEFAULT_WORKERS}, max: {MAX_WORKERS})")
     print("                     Lower values reduce risk of IP bans but slow downloads")
     print(f"{Fore.YELLOW}  -h, --help{Style.RESET_ALL}         Show this help message")
     
@@ -174,9 +215,9 @@ def display_help(show_logo=True):
     print("  6. Error skipping: No retry for videos that cannot have transcripts (subtitles disabled, etc.)")
     
     print(f"\n{Fore.GREEN}  RECOMMENDED SETTINGS:")
-    print(f"  - Normal usage: Default values ({Fore.CYAN}-delay 1.5 -workers 3{Style.RESET_ALL})")
+    print(f"  - Safe usage: Default values ({Fore.CYAN}-delay {DEFAULT_DELAY} -workers {DEFAULT_WORKERS}{Style.RESET_ALL})")
     print(f"  - If IP banned:")
-    print("    1. Switch to very slow settings (-delay 5 -workers 1) until ban is lifted")
+    print("    1. Switch to very slow settings (-delay 10 -workers 1) until ban is lifted")
     print("    2. After ban is lifted, continue with these slow settings for 5-7 minutes")
     print("    3. Then reduce to half your original speed (double delay, halve workers)")
     print("    4. If banned again, repeat the halving process until bans stop permanently")
@@ -188,21 +229,6 @@ def display_help(show_logo=True):
     print("  - colorama (pip install colorama)")
     print("  - tqdm (pip install tqdm)")
     print(f"{Fore.CYAN}=" * 80)
-
-def main():
-    # Clear screen for better presentation
-    os.system('cls' if os.name == 'nt' else 'clear')
-    
-    # Display logo only once
-    display_logo()
-    
-    # Parse arguments
-    try:
-        urls, languages, download_all, download_txt, download_json, delay, workers = parse_arguments()
-    except Exception as e:
-        logging.error(f"Error parsing arguments: {e}")
-        display_help(show_logo=False)  # Don't show logo again
-        sys.exit(1)   
 
 def get_system_language():
     """Get the user's system language."""
@@ -249,8 +275,8 @@ def parse_arguments():
     parser.add_argument('-all', action='store_true', help="Download all available languages")
     parser.add_argument('-txt', action='store_true', help="Download only TXT files")
     parser.add_argument('-json', action='store_true', help="Download only JSON files")
-    parser.add_argument('-delay', type=float, default=1.5, help="Delay between API requests in seconds")
-    parser.add_argument('-workers', type=int, default=3, help="Number of concurrent downloads")
+    parser.add_argument('-delay', type=float, default=DEFAULT_DELAY, help=f"Delay between API requests in seconds (default: {DEFAULT_DELAY})")
+    parser.add_argument('-workers', type=int, default=DEFAULT_WORKERS, help=f"Number of concurrent downloads (default: {DEFAULT_WORKERS})")
     
     # First parse just the file and help arguments
     args, remaining = parser.parse_known_args()
@@ -265,8 +291,8 @@ def parse_arguments():
     download_all = args.all  # Flag to download all languages
     download_txt = True if not args.json else False  # Default to both unless only JSON is specified
     download_json = True if not args.txt else False  # Default to both unless only TXT is specified
-    delay = max(0.5, args.delay)  # Ensure minimum delay of 0.5 seconds
-    workers = max(1, min(10, args.workers))  # Limit workers between 1 and 10
+    delay = max(MIN_DELAY, args.delay)  # Ensure minimum delay
+    workers = max(1, min(MAX_WORKERS, args.workers))  # Limit workers
     
     # Check for conflict
     if args.txt and args.json:
@@ -363,67 +389,78 @@ def detect_languages_in_folder(channel_dir):
     
     return languages
 
+def normalize_channel_url(url):
+    """
+    Normalize YouTube channel URLs to ensure yt-dlp can extract all videos.
+    Appends '/videos' to channel URLs if they don't already point to a specific tab.
+    """
+    if not url:
+        return url
+        
+    # Only process YouTube channel/user URLs
+    if not any(x in url for x in ['/channel/', '/c/', '/user/', '/@']):
+        return url
+        
+    # Don't modify if it already has a specific tab or playlist
+    if any(x in url for x in ['/videos', '/playlists', '/shorts', '/streams', '/community', '/about', '/featured']):
+        return url
+        
+    # Append /videos to ensure yt-dlp extracts the video list
+    return url.rstrip('/') + '/videos'
+
+def is_single_video_url(url):
+    """Check if the URL points to a single video rather than a channel or playlist."""
+    if not url:
+        return False
+    return any(x in url for x in ['watch?v=', 'youtu.be/', '/shorts/', '/live/'])
+
 def get_channel_name(channel_url):
     """Get the channel name for directory creation."""
     logging.info("Retrieving channel name...")
-    
-    # Add a spinner animation for visual feedback
-    spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
-    spinner_idx = 0
-    process = None
     
     try:
         command = [
             "yt-dlp",
             "--skip-download",
             "--print", "%(channel)s",
-            "--playlist-items", "1",  # Only get info for one video to speed things up
-            channel_url
+            "-q",
+            "--no-warnings"
         ]
         
+        if not is_single_video_url(channel_url):
+            command.extend(["--playlist-items", "1"])
+            
+        command.append(channel_url)
+        
         logging.debug(f"Running command: {' '.join(command)}")
+        
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         active_processes.append(process)
         
-        # Display spinner while waiting
-        while process.poll() is None:
-            sys.stdout.write(f"\r{Fore.CYAN}Fetching channel info... {spinner[spinner_idx]}{Style.RESET_ALL}")
-            sys.stdout.flush()
-            spinner_idx = (spinner_idx + 1) % len(spinner)
-            time.sleep(0.1)
-        
-        stdout, stderr = process.communicate()
-        active_processes.remove(process)
-        
-        # Clear spinner line
-        sys.stdout.write("\r" + " " * 50 + "\r")
-        sys.stdout.flush()
+        try:
+            stdout, stderr = process.communicate(timeout=60)
+        except subprocess.TimeoutExpired:
+            logging.error("Timeout while fetching channel name")
+            process.kill()
+            stdout, stderr = process.communicate()
+            return "youtube_channel"
+        finally:
+            if process in active_processes:
+                active_processes.remove(process)
         
         channel_name = stdout.strip()
         
         if not channel_name:
             logging.warning("Couldn't retrieve channel name, using default.")
+            if stderr.strip():
+                logging.debug(f"yt-dlp stderr: {stderr.strip()[:500]}")
             return "youtube_channel"
             
         logging.info(f"Channel name: {Fore.CYAN}{channel_name}{Style.RESET_ALL}")
         return sanitize_filename(channel_name)
     
-    except subprocess.TimeoutExpired:
-        logging.error("Timeout while fetching channel name")
-        try:
-            process.terminate()
-            active_processes.remove(process)
-        except Exception as e:
-            logging.error(f"Error terminating process: {e}")
-        return "youtube_channel"
     except Exception as e:
         logging.error(f"Error fetching channel name: {e}")
-        try:
-            if process in active_processes:
-                process.terminate()
-                active_processes.remove(process)
-        except Exception as ex:
-            logging.error(f"Error terminating process: {ex}")
         return "youtube_channel"
 
 def get_videos_from_channel(channel_url):
@@ -436,22 +473,38 @@ def get_videos_from_channel(channel_url):
     try:
         command = [
             "yt-dlp", 
-            "--flat-playlist", 
             "--print", "%(id)s %(title)s",
-            channel_url
+            "--no-warnings"
         ]
+        
+        if not is_single_video_url(channel_url):
+            command.insert(1, "--flat-playlist")
+            
+        command.append(channel_url)
         
         logging.debug(f"Running command: {' '.join(command)}")
         
-        # Direct execution without progress bars
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         active_processes.append(process)
         
-        stdout, stderr = process.communicate(timeout=600)
-        active_processes.remove(process)
+        try:
+            stdout, stderr = process.communicate(timeout=600)
+        except subprocess.TimeoutExpired:
+            logging.error("Timeout while fetching videos list. Try again or use a different channel.")
+            process.kill()
+            stdout, stderr = process.communicate()
+            return []
+        finally:
+            if process in active_processes:
+                active_processes.remove(process)
         
         if not stdout.strip():
             logging.error("No video data returned. Check the channel URL.")
+            if stderr.strip():
+                err_snippet = stderr.strip()[:500]
+                logging.error(f"yt-dlp output: {err_snippet}")
+                if any(x in err_snippet.lower() for x in ["bot", "sign in", "consent", "403", "forbidden"]):
+                    logging.warning(f"{Fore.YELLOW}Hint: YouTube may be blocking yt-dlp. Try updating yt-dlp (`pip install --upgrade yt-dlp`) or using a cookies file.{Style.RESET_ALL}")
             return []
             
         videos_data = []
@@ -476,49 +529,25 @@ def get_videos_from_channel(channel_url):
         logging.info(f"Total videos found: {Fore.GREEN}{len(videos_data)}{Style.RESET_ALL}")
         return videos_data
     
-    except subprocess.TimeoutExpired:
-        logging.error("Timeout while fetching videos list. Try again or use a different channel.")
-        try:
-            process.terminate()
-            active_processes.remove(process)
-        except Exception as e:
-            logging.error(f"Error terminating process: {e}")
-        return []
     except Exception as e:
         logging.error(f"Error fetching videos from channel: {e}")
-        try:
-            if process in active_processes:
-                process.terminate()
-                active_processes.remove(process)
-        except Exception as ex:
-            logging.error(f"Error terminating process: {ex}")
-        if stderr:
-            logging.error(f"Error output: {stderr}")
         return []
 
 def should_use_language_folders(existing_languages, requested_languages):
     """Determine if we should use language-specific folders."""
-    # Use language folders if:
-    # 1. Multiple languages requested in this run, OR
-    # 2. Multiple languages already exist in folder, OR
-    # 3. A single language is requested that doesn't match any existing language
-    
     if len(requested_languages) > 1:
         return True
     
     if len(existing_languages) > 1:
         return True
     
-    # If we have one requested language and one existing language, check if they differ
     if len(requested_languages) == 1 and len(existing_languages) == 1:
         if list(requested_languages)[0] not in existing_languages:
             return True
     
-    # If we have one requested language and no existing languages, no need for language folders
     if len(requested_languages) == 1 and len(existing_languages) == 0:
         return False
     
-    # If we have one requested language and it's not in multiple existing languages
     if len(requested_languages) == 1 and len(existing_languages) > 0:
         if list(requested_languages)[0] not in existing_languages:
             return True
@@ -532,16 +561,12 @@ def move_files_to_language_folders(channel_dir, languages):
     
     logging.info(f"{Fore.YELLOW}Reorganizing existing files into language folders...{Style.RESET_ALL}")
     
-    # Create language directories if they don't exist
     for lang in languages:
         lang_dir = os.path.join(channel_dir, lang)
         os.makedirs(lang_dir, exist_ok=True)
-        
-        # Create json subdirectory in language directory
         json_dir = os.path.join(lang_dir, "json")
         os.makedirs(json_dir, exist_ok=True)
     
-    # Move TXT files from main directory to language directories
     files_to_move = []
     for file in os.listdir(channel_dir):
         if file.endswith(".txt"):
@@ -549,7 +574,6 @@ def move_files_to_language_folders(channel_dir, languages):
                 if f"_{lang}.txt" in file:
                     files_to_move.append((file, lang, "txt"))
     
-    # Move JSON files from json directory to language/json directories
     json_dir = os.path.join(channel_dir, "json")
     if os.path.exists(json_dir) and os.path.isdir(json_dir):
         for file in os.listdir(json_dir):
@@ -558,49 +582,42 @@ def move_files_to_language_folders(channel_dir, languages):
                     if f"_{lang}.json" in file:
                         files_to_move.append((file, lang, "json"))
     
-    # Actually move the files now that we've identified them
     if files_to_move:
         with tqdm(total=len(files_to_move), desc=f"{Fore.YELLOW}Moving files{Style.RESET_ALL}", colour='yellow') as pbar:
             for file, lang, file_type in files_to_move:
                 if file_type == "txt":
                     src = os.path.join(channel_dir, file)
                     dst = os.path.join(channel_dir, lang, file)
-                else:  # json
+                else:
                     src = os.path.join(channel_dir, "json", file)
                     dst = os.path.join(channel_dir, lang, "json", file)
                 
                 if not os.path.exists(dst):
                     try:
                         shutil.move(src, dst)
-                        pbar.update(1)
                     except Exception as e:
                         logging.error(f"Error moving file {file}: {e}")
-                        pbar.update(1)
-                else:
-                    pbar.update(1)
+                pbar.update(1)
         
         logging.info(f"Successfully moved {Fore.GREEN}{len(files_to_move)}{Style.RESET_ALL} files to language-specific folders")
     else:
         logging.info("No files needed to be moved")
     
-    # Check if the json directory is empty and remove it if it is
     json_dir = os.path.join(channel_dir, "json")
     if os.path.exists(json_dir) and os.path.isdir(json_dir):
-        # Check if it's empty
         if not os.listdir(json_dir):
             try:
                 os.rmdir(json_dir)
-                logging.debug(f"Removed empty json directory: {json_dir}")
             except Exception as e:
                 logging.error(f"Error removing empty json directory: {e}")
     
     logging.info(f"{Fore.GREEN}File reorganization complete{Style.RESET_ALL}")
 
 def get_available_languages(video_id):
-    """Get all available languages for a video."""
+    """Get all available languages for a video using the new API."""
     try:
         with tqdm(total=1, desc=f"{Fore.CYAN}Checking available languages{Style.RESET_ALL}", bar_format='{desc}: {bar}| {elapsed}', colour='cyan') as pbar:
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            transcript_list = ytt_api.list(video_id)
             languages = []
             
             for transcript in transcript_list:
@@ -622,48 +639,36 @@ def controlled_delay(base_delay):
     time.sleep(sleep_time)
 
 def adjust_rate_for_ban_recovery(current_delay, current_workers):
-    """
-    Adjust rate limiting parameters when a ban is detected or after recovery.
-    Returns new delay and workers count.
-    """
+    """Adjust rate limiting parameters when a ban is detected or after recovery."""
     global original_delay, original_workers, ban_detected, ban_recovery_time
     
-    # First time configuration - store original settings
     if original_delay is None:
         original_delay = current_delay
         original_workers = current_workers
     
-    # If we detect a ban
     if not ban_detected:
         ban_detected = True
         print(f"\n{Fore.RED}⚠️  YouTube rate limit/ban detected! Switching to recovery mode...{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}Original settings: delay={original_delay}s, workers={original_workers}{Style.RESET_ALL}")
-        print(f"{Fore.GREEN}Switching to slow mode: delay=5s, workers=1{Style.RESET_ALL}")
-        return 5.0, 1  # Very slow settings during ban
+        print(f"{Fore.GREEN}Switching to slow mode: delay=10s, workers=1{Style.RESET_ALL}")
+        return 10.0, 1
     
-    # If ban was already detected and this is called again
     if ban_recovery_time is None:
-        # First recovery after ban lifted
         ban_recovery_time = time.time()
         print(f"\n{Fore.GREEN}✓ Ban appears to be lifted, starting recovery period...{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}Continuing slow mode for 5-7 minutes: delay=5s, workers=1{Style.RESET_ALL}")
-        return 5.0, 1  # Keep very slow settings during initial recovery
+        print(f"{Fore.YELLOW}Continuing slow mode for 5-7 minutes: delay=10s, workers=1{Style.RESET_ALL}")
+        return 10.0, 1
     
-    # Check if we're past the recovery period (5-7 minutes)
     minutes_since_recovery = (time.time() - ban_recovery_time) / 60
     if minutes_since_recovery < random.uniform(5, 7):
-        # Still in recovery period
-        return 5.0, 1  # Keep very slow settings during recovery period
+        return 10.0, 1
     
-    # Past recovery period - calculate half speed from original
     new_delay = original_delay * 2
     new_workers = max(1, original_workers // 2)
     
-    # Update original values for potential future halving
     original_delay = new_delay
     original_workers = new_workers
     
-    # Reset ban tracking for future detections
     ban_detected = False
     ban_recovery_time = None
     
@@ -678,55 +683,52 @@ def download_transcript_with_retry(video_id, language, max_retries=3, base_delay
     retries = 0
     while retries <= max_retries:
         try:
-            # Add a delay before each request, longer after each retry
             if retries > 0:
-                backoff_delay = base_delay * (2 ** retries)  # Exponential backoff
+                backoff_delay = base_delay * (2 ** retries)
                 logging.info(f"Retry {retries}/{max_retries} for {video_id} - waiting {backoff_delay:.1f} seconds...")
                 time.sleep(backoff_delay)
             
-            # Add a small delay even on first attempt
             controlled_delay(base_delay)
             
-            # Attempt to get the transcript
-            transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=[language])
+            # Attempt to get the transcript using the new API and convert to raw dict format
+            transcript = ytt_api.fetch(video_id, languages=[language]).to_raw_data()
             return transcript, None  # Success
             
-        except _errors.NoTranscriptFound:
-            # No need to retry if transcript doesn't exist
+        except NoTranscriptFound:
             return None, f"No {language} transcript available"
             
-        except _errors.TranscriptsDisabled:
+        except TranscriptsDisabled:
             return None, f"Subtitles are disabled for this video"
+            
+        except AgeRestricted:
+            return None, f"Age restricted video (requires authentication)"
+            
+        except (VideoUnavailable, VideoUnplayable, InvalidVideoId) as e:
+            return None, f"Video unavailable or unplayable: {str(e)}"
             
         except Exception as e:
             error_str = str(e).lower()
+            exception_name = type(e).__name__.lower()
             
-            # Don't retry for these specific cases:
-            if "age-restricted" in error_str:
-                return None, f"Age restricted video (requires authentication)"
-            
-            if "subtitles are disabled" in error_str:
+            if "subtitles are disabled" in error_str or "disabled" in exception_name:
                 return None, f"Subtitles are disabled for this video"
                 
-            if "this video doesn't have" in error_str or "transcript unavailable" in error_str:
+            if "this video doesn't have" in error_str or "transcript unavailable" in error_str or "notranscriptavailable" in exception_name:
                 return None, f"No transcript available for this video"
             
             # Check for rate limiting indicators
-            if "429" in error_str or "too many requests" in error_str or "rate limit" in error_str:
+            if "429" in error_str or "too many requests" in error_str or "rate limit" in error_str or "ipblocked" in exception_name or "requestblocked" in exception_name or isinstance(e, (IpBlocked, RequestBlocked, YouTubeRequestFailed)):
                 logging.warning(f"Rate limit detected for {video_id}. Backing off...")
-                # Mark ban as detected for recovery process
                 ban_detected = True
                 
                 if retries < max_retries:
                     retries += 1
-                    # Use a longer delay for rate limit errors
                     backoff_delay = base_delay * (3 ** retries)
                     time.sleep(backoff_delay)
                 else:
                     return None, f"Rate limited: {str(e)}"
             else:
-                # For other errors, retry fewer times
-                if retries < 1:  # Only retry once for non-rate-limit errors
+                if retries < 1:
                     retries += 1
                 else:
                     return None, str(e)
@@ -1030,6 +1032,12 @@ def download_transcripts_parallel(videos_data, languages, channel_name, download
 
 def process_channel(channel_url, languages, download_all, download_txt, download_json, delay, workers):
     """Process a single channel."""
+    # Normalize URL for better yt-dlp compatibility
+    normalized_url = normalize_channel_url(channel_url)
+    if normalized_url != channel_url:
+        logging.info(f"Normalized URL: {Fore.CYAN}{normalized_url}{Style.RESET_ALL}")
+        channel_url = normalized_url
+        
     # Get channel name for directory creation
     channel_name = get_channel_name(channel_url)
     
@@ -1083,6 +1091,15 @@ def main():
         file_types.append("JSON")
     logging.info(f"File types to download: {Fore.CYAN}{', '.join(file_types)}{Style.RESET_ALL}")
     logging.info(f"Rate limiting: {Fore.YELLOW}{delay}s{Style.RESET_ALL} delay between requests, {Fore.YELLOW}{workers}{Style.RESET_ALL} concurrent workers")
+    
+    # Safety warning for aggressive scraping
+    if delay < 5.0 or workers > 1:
+        print(f"{Fore.RED}{'='*80}{Style.RESET_ALL}")
+        logging.warning(f"{Fore.YELLOW}⚠️  WARNING: Aggressive rate limiting detected (-delay {delay}s, -workers {workers}).{Style.RESET_ALL}")
+        logging.warning(f"{Fore.YELLOW}This may trigger an IP ban. Safe defaults are: -delay {DEFAULT_DELAY} -workers {DEFAULT_WORKERS}{Style.RESET_ALL}")
+        print(f"{Fore.RED}{'='*80}{Style.RESET_ALL}")
+        time.sleep(2) # Brief pause so the user sees it
+    
     print(f"{Fore.CYAN}{'-'*80}{Style.RESET_ALL}")
     
     total_downloaded = 0
