@@ -1,7 +1,3 @@
-You are absolutely right, I apologize for that oversight! The `-LANG` option and language support are core features of the script and should definitely be highlighted in the README.
-
-Here is the corrected `README.md` with the language features properly restored and emphasized:
-
 ```markdown
 # YouTube Channel Transcript Downloader (v1.1.0)
 
