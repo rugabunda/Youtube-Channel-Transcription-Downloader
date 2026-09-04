@@ -1,3 +1,4 @@
+***
 ```markdown
 # YouTube Channel Transcript Downloader (v1.1.0)
 
